@@ -21,14 +21,112 @@
 # limitations under the License.
 
 import math
+import os
+import functools
+import inspect
+import json
+import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
+from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.nn import Parameter
+
+def find_mlx_a2a_root():
+    """Find the root directory of the mlx_a2a repository."""
+    # Start from the current working directory
+    current_dir = Path.cwd()
+    
+    # Go up the directory tree until we find the mlx_a2a directory
+    while current_dir != current_dir.parent:
+        if current_dir.name == "mlx-a2a":
+            return current_dir
+        
+        # Also check if mlx_a2a is a subdirectory
+        mlx_a2a_dir = current_dir / "mlx_a2a"
+        if mlx_a2a_dir.exists() and mlx_a2a_dir.is_dir():
+            return mlx_a2a_dir
+            
+        current_dir = current_dir.parent
+    
+    # If we couldn't find the mlx_a2a directory, use the current working directory
+    raise RuntimeError("Warning: Could not find mlx-a2a directory!")
+
+def save_io_decorator_get_rope_index(func):
+    """
+    Decorator to save inputs and outputs of the get_rope_index method.
+    This will save the inputs and outputs as numpy arrays in a directory.
+    """
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        # Find the mlx_a2a root and create directory to store inputs and outputs
+        repo_root = find_mlx_a2a_root()
+        save_dir = repo_root / "io_capture_qwen2_5_omni_rope_index"
+        save_dir.mkdir(exist_ok=True)
+        
+        # Get parameter names from function signature
+        sig = inspect.signature(func)
+        param_names = list(sig.parameters.keys())[1:]  # Skip 'self'
+        
+        # Process and save inputs
+        inputs_dict = {}
+        for i, arg in enumerate(args):
+            if i < len(param_names):
+                param_name = param_names[i]
+                if isinstance(arg, torch.Tensor):
+                    inputs_dict[param_name] = arg.detach().cpu().numpy()
+                elif arg is None:
+                    inputs_dict[param_name] = None
+                else:
+                    inputs_dict[param_name] = arg
+        
+        for param_name, arg in kwargs.items():
+            if isinstance(arg, torch.Tensor):
+                inputs_dict[param_name] = arg.detach().cpu().numpy()
+            elif arg is None:
+                inputs_dict[param_name] = None
+            else:
+                inputs_dict[param_name] = arg
+        
+        # Save non-None inputs
+        np.savez_compressed(
+            save_dir / "get_rope_index_inputs.npz",
+            **{k: v for k, v in inputs_dict.items() if v is not None and not isinstance(v, bool)}
+        )
+        
+        # Save None inputs and boolean inputs separately as JSON
+        with open(save_dir / "get_rope_index_metadata.json", "w") as f:
+            json.dump({
+                "none_inputs": {k: None for k, v in inputs_dict.items() if v is None},
+                "bool_inputs": {k: v for k, v in inputs_dict.items() if isinstance(v, bool)}
+            }, f, indent=2)
+        
+        # Call the original function
+        outputs = func(self, *args, **kwargs)
+        
+        # Process and save outputs
+        if isinstance(outputs, tuple):
+            outputs_dict = {}
+            for i, output in enumerate(outputs):
+                if isinstance(output, torch.Tensor):
+                    outputs_dict[f"output_{i}"] = output.detach().cpu().numpy()
+                else:
+                    outputs_dict[f"output_{i}"] = output
+            np.savez_compressed(save_dir / "get_rope_index_outputs.npz", **outputs_dict)
+        else:
+            if isinstance(outputs, torch.Tensor):
+                np.savez_compressed(save_dir / "get_rope_index_outputs.npz", output=outputs.detach().cpu().numpy())
+            else:
+                np.savez_compressed(save_dir / "get_rope_index_outputs.npz", output=outputs)
+        
+        print(f"Saved inputs and outputs to {save_dir}")
+        return outputs
+    
+    return wrapper
 
 from ...activations import ACT2FN
 from ...cache_utils import Cache, DynamicCache, SlidingWindowCache, StaticCache
@@ -268,6 +366,7 @@ class Qwen2_5OmniPreTrainedModelForConditionalGeneration(Qwen2_5OmniPreTrainedMo
 
         return list(_iter())
 
+    @save_io_decorator_get_rope_index
     def get_rope_index(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -2390,7 +2489,6 @@ class Qwen2_5OmniThinkerForConditionalGeneration(Qwen2_5OmniPreTrainedModelForCo
 
         >>> response = processor.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
         ```"""
-
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states

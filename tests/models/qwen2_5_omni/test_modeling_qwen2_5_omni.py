@@ -604,7 +604,6 @@ class Qwen2_5OmniModelIntegrationTest(unittest.TestCase):
 
         # verify generation
         inputs = inputs.to(torch_device)
-        raise Exception(f"{inputs.keys()=}")
 
         output = model.generate(**inputs, thinker_temperature=0, thinker_do_sample=False, return_audio=False)
 
