@@ -366,7 +366,7 @@ class Qwen2_5OmniPreTrainedModelForConditionalGeneration(Qwen2_5OmniPreTrainedMo
 
         return list(_iter())
 
-    @save_io_decorator_get_rope_index
+    # @save_io_decorator_get_rope_index
     def get_rope_index(
         self,
         input_ids: Optional[torch.LongTensor] = None,
