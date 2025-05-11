@@ -78,7 +78,7 @@ def save_io(func):
             if i < len(param_names):
                 param_name = param_names[i]
                 if isinstance(arg, torch.Tensor):
-                    inputs_dict[param_name] = arg.detach().cpu().numpy()
+                    inputs_dict[param_name] = arg.detach().cpu()
                 elif arg is None:
                     inputs_dict[param_name] = None
                 else:
@@ -86,16 +86,16 @@ def save_io(func):
         
         for param_name, arg in kwargs.items():
             if isinstance(arg, torch.Tensor):
-                inputs_dict[param_name] = arg.detach().cpu().numpy()
+                inputs_dict[param_name] = arg.detach().cpu()
             elif arg is None:
                 inputs_dict[param_name] = None
             else:
                 inputs_dict[param_name] = arg
         
         # Save non-None inputs
-        np.savez_compressed(
-            save_dir / "inputs.npz",
-            **{k: v for k, v in inputs_dict.items() if v is not None and not isinstance(v, bool)}
+        torch.save(
+            {k: v for k, v in inputs_dict.items() if v is not None and not isinstance(v, bool)},
+            save_dir / "inputs.pt"
         )
         
         # Save None inputs and boolean inputs separately as JSON
@@ -103,7 +103,7 @@ def save_io(func):
             json.dump({
                 "none_inputs": {k: None for k, v in inputs_dict.items() if v is None},
                 "bool_inputs": {k: v for k, v in inputs_dict.items() if isinstance(v, bool)},
-                "saved_npz_info": {
+                "saved_pt_info": {
                     k: {"shape": v.shape if hasattr(v, 'shape') else (),
                         "dtype": str(v.dtype) if hasattr(v, 'dtype') else type(v).__name__}
                     for k, v in inputs_dict.items()
@@ -114,53 +114,53 @@ def save_io(func):
         # Call the original function
         outputs_result = func(self, *args, **kwargs)
         
-        outputs_file_name = "outputs.npz"
+        outputs_file_name = "outputs.pt"
         output_metadata_file_name = "output_metadata.json"
         
         all_outputs_for_metadata = {}
-        outputs_to_save_in_npz = {}
+        outputs_to_save_in_pt = {}
 
         if isinstance(outputs_result, tuple):
             for i, output_item in enumerate(outputs_result):
                 key = f"output_{i}"
                 if isinstance(output_item, torch.Tensor):
-                    processed_item = output_item.detach().cpu().numpy()
+                    processed_item = output_item.detach().cpu()
                 else:
                     processed_item = output_item
                 all_outputs_for_metadata[key] = processed_item
                 if processed_item is not None and not isinstance(processed_item, bool):
-                    outputs_to_save_in_npz[key] = processed_item
+                    outputs_to_save_in_pt[key] = processed_item
         else:  # Single output
             key = "output"
             if isinstance(outputs_result, torch.Tensor):
-                processed_item = outputs_result.detach().cpu().numpy()
+                processed_item = outputs_result.detach().cpu()
             else:
                 processed_item = outputs_result
             all_outputs_for_metadata[key] = processed_item
             if processed_item is not None and not isinstance(processed_item, bool):
-                 outputs_to_save_in_npz[key] = processed_item
+                 outputs_to_save_in_pt[key] = processed_item
         
-        # Save data to .npz, only non-None and non-bool items
-        if outputs_to_save_in_npz:
-            np.savez_compressed(save_dir / outputs_file_name, **outputs_to_save_in_npz)
+        # Save data to .pt, only non-None and non-bool items
+        if outputs_to_save_in_pt:
+            torch.save(outputs_to_save_in_pt, save_dir / outputs_file_name)
         else:
-            # Save an empty npz file if there's nothing to save (e.g., all outputs are None or bool)
-            np.savez_compressed(save_dir / outputs_file_name)
+            # Save an empty pt file if there's nothing to save (e.g., all outputs are None or bool)
+            torch.save({}, save_dir / outputs_file_name)
 
         # Prepare and save output metadata
         output_metadata_content = {
             "none_outputs": {k: None for k, v in all_outputs_for_metadata.items() if v is None},
             "bool_outputs": {k: v for k, v in all_outputs_for_metadata.items() if isinstance(v, bool)},
-            "saved_npz_info": {
+            "saved_pt_info": {
                 k: {"shape": v.shape if hasattr(v, 'shape') else (),
                     "dtype": str(v.dtype) if hasattr(v, 'dtype') else type(v).__name__}
-                for k, v in outputs_to_save_in_npz.items() # Iterate over what's actually saved
+                for k, v in outputs_to_save_in_pt.items() # Iterate over what's actually saved
             }
         }
         with open(save_dir / output_metadata_file_name, "w") as f:
             json.dump(output_metadata_content, f, indent=2)
             
-        print(f"Saved inputs, outputs, and their metadata to {save_dir}")
+        print(f"Saved inputs, outputs (as .pt), and their metadata to {save_dir}")
         return outputs_result
     
     return wrapper
