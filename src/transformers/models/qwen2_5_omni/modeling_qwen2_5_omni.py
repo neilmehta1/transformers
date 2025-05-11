@@ -102,30 +102,66 @@ def save_io(func):
         with open(save_dir / "input_metadata.json", "w") as f:
             json.dump({
                 "none_inputs": {k: None for k, v in inputs_dict.items() if v is None},
-                "bool_inputs": {k: v for k, v in inputs_dict.items() if isinstance(v, bool)}
+                "bool_inputs": {k: v for k, v in inputs_dict.items() if isinstance(v, bool)},
+                "saved_npz_info": {
+                    k: {"shape": v.shape if hasattr(v, 'shape') else (),
+                        "dtype": str(v.dtype) if hasattr(v, 'dtype') else type(v).__name__}
+                    for k, v in inputs_dict.items()
+                    if v is not None and not isinstance(v, bool)
+                }
             }, f, indent=2)
         
         # Call the original function
-        outputs = func(self, *args, **kwargs)
+        outputs_result = func(self, *args, **kwargs)
         
         outputs_file_name = "outputs.npz"
-        # Process and save outputs
-        if isinstance(outputs, tuple):
-            outputs_dict = {}
-            for i, output in enumerate(outputs):
-                if isinstance(output, torch.Tensor):
-                    outputs_dict[f"output_{i}"] = output.detach().cpu().numpy()
-                else:
-                    outputs_dict[f"output_{i}"] = output
-            np.savez_compressed(save_dir / outputs_file_name, **outputs_dict)
-        else:
-            if isinstance(outputs, torch.Tensor):
-                np.savez_compressed(save_dir / outputs_file_name, output=outputs.detach().cpu().numpy())
-            else:
-                np.savez_compressed(save_dir / outputs_file_name, output=outputs)
+        output_metadata_file_name = "output_metadata.json"
         
-        print(f"Saved inputs and outputs to {save_dir}")
-        return outputs
+        all_outputs_for_metadata = {}
+        outputs_to_save_in_npz = {}
+
+        if isinstance(outputs_result, tuple):
+            for i, output_item in enumerate(outputs_result):
+                key = f"output_{i}"
+                if isinstance(output_item, torch.Tensor):
+                    processed_item = output_item.detach().cpu().numpy()
+                else:
+                    processed_item = output_item
+                all_outputs_for_metadata[key] = processed_item
+                if processed_item is not None and not isinstance(processed_item, bool):
+                    outputs_to_save_in_npz[key] = processed_item
+        else:  # Single output
+            key = "output"
+            if isinstance(outputs_result, torch.Tensor):
+                processed_item = outputs_result.detach().cpu().numpy()
+            else:
+                processed_item = outputs_result
+            all_outputs_for_metadata[key] = processed_item
+            if processed_item is not None and not isinstance(processed_item, bool):
+                 outputs_to_save_in_npz[key] = processed_item
+        
+        # Save data to .npz, only non-None and non-bool items
+        if outputs_to_save_in_npz:
+            np.savez_compressed(save_dir / outputs_file_name, **outputs_to_save_in_npz)
+        else:
+            # Save an empty npz file if there's nothing to save (e.g., all outputs are None or bool)
+            np.savez_compressed(save_dir / outputs_file_name)
+
+        # Prepare and save output metadata
+        output_metadata_content = {
+            "none_outputs": {k: None for k, v in all_outputs_for_metadata.items() if v is None},
+            "bool_outputs": {k: v for k, v in all_outputs_for_metadata.items() if isinstance(v, bool)},
+            "saved_npz_info": {
+                k: {"shape": v.shape if hasattr(v, 'shape') else (),
+                    "dtype": str(v.dtype) if hasattr(v, 'dtype') else type(v).__name__}
+                for k, v in outputs_to_save_in_npz.items() # Iterate over what's actually saved
+            }
+        }
+        with open(save_dir / output_metadata_file_name, "w") as f:
+            json.dump(output_metadata_content, f, indent=2)
+            
+        print(f"Saved inputs, outputs, and their metadata to {save_dir}")
+        return outputs_result
     
     return wrapper
 
@@ -367,7 +403,7 @@ class Qwen2_5OmniPreTrainedModelForConditionalGeneration(Qwen2_5OmniPreTrainedMo
 
         return list(_iter())
 
-    # @save_io
+    @save_io
     def get_rope_index(
         self,
         input_ids: Optional[torch.LongTensor] = None,
