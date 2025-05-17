@@ -605,6 +605,7 @@ class Qwen2_5OmniModelIntegrationTest(unittest.TestCase):
         # verify generation
         inputs = inputs.to(torch_device)
 
+        model.thinker.audio_tower = model.thinker.audio_tower.to(dtype=torch.float32)
         output = model.generate(**inputs, thinker_temperature=0, thinker_do_sample=False, return_audio=False)
 
         EXPECTED_DECODED_TEXT = "system\nYou are a helpful assistant.\nuser\nWhat's that sound and what kind of dog is this?\nassistant\nThe sound is glass shattering, and the dog appears to be a Labrador Retriever."
