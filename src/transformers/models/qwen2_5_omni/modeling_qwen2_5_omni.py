@@ -76,6 +76,7 @@ def save_io(func):
 
     @functools.wraps(func)
     def wrapper(self, *args, **kwargs):
+        args = list(args)
         func_identifier = (self.__class__.__name__, func.__name__)
 
         if func_identifier in save_io._io_saved_this_process:
@@ -102,13 +103,19 @@ def save_io(func):
         # Get parameter names from function signature
         sig = inspect.signature(func)
         param_names = list(sig.parameters.keys())[1:]  # Skip 'self'
+
+        # Covert this module to float32
+        self.to(dtype=torch.float32)
+
         
         inputs_dict = {}
         for i, arg_val in enumerate(args):
             if i < len(param_names):
                 param_name = param_names[i]
                 if isinstance(arg_val, torch.Tensor):
-                    inputs_dict[param_name] = arg_val.detach().cpu()
+                    # convert inputs to float32
+                    args[i] = args[i].to(dtype=torch.float32)
+                    inputs_dict[param_name] = args[i].detach().cpu()
                 elif arg_val is None:
                     inputs_dict[param_name] = None
                 else:
@@ -1500,6 +1507,7 @@ class Qwen2_5OmniVisionEncoder(Qwen2_5OmniPreTrainedModel):
 
         return window_index, cu_window_seqlens
 
+    # @save_io
     def forward(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -1521,7 +1529,6 @@ class Qwen2_5OmniVisionEncoder(Qwen2_5OmniPreTrainedModel):
             dtype=grid_thw.dtype if torch.jit.is_tracing() else torch.int32,
         )
         cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
-
         seq_len, _ = hidden_states.size()
         hidden_states = hidden_states.reshape(seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
         hidden_states = hidden_states[window_index, :, :]
@@ -1556,6 +1563,8 @@ class Qwen2_5OmniVisionEncoder(Qwen2_5OmniPreTrainedModel):
                     cu_seqlens=cu_seqlens_now,
                     rotary_pos_emb=rotary_pos_emb,
                 )
+        raise Exception(f"{hidden_states=}, {hidden_states.shape=}")
+
         hidden_states = self.merger(hidden_states)
         reverse_indices = torch.argsort(window_index)
         hidden_states = hidden_states[reverse_indices, :]
