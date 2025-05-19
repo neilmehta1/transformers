@@ -1346,6 +1346,7 @@ class Qwen2_5OmniVisionBlock(nn.Module):
         )
         self.mlp = Qwen2_5OmniMLP(config, bias=True)
 
+    # @save_io
     def forward(self, hidden_states, cu_seqlens, rotary_pos_emb) -> torch.Tensor:
         hidden_states = hidden_states + self.attn(
             self.norm1(hidden_states), cu_seqlens=cu_seqlens, rotary_pos_emb=rotary_pos_emb
@@ -1371,6 +1372,7 @@ class Qwen2_5_VisionPatchEmbed(nn.Module):
         kernel_size = [temporal_patch_size, patch_size, patch_size]
         self.proj = nn.Conv3d(in_channels, embed_dim, kernel_size=kernel_size, stride=kernel_size, bias=False)
 
+    # @save_io
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         target_dtype = self.proj.weight.dtype
         hidden_states = hidden_states.view(
@@ -1563,7 +1565,6 @@ class Qwen2_5OmniVisionEncoder(Qwen2_5OmniPreTrainedModel):
                     cu_seqlens=cu_seqlens_now,
                     rotary_pos_emb=rotary_pos_emb,
                 )
-        raise Exception(f"{hidden_states=}, {hidden_states.shape=}")
 
         hidden_states = self.merger(hidden_states)
         reverse_indices = torch.argsort(window_index)
